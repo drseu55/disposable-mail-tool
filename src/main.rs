@@ -1,4 +1,7 @@
 use owo_colors::OwoColorize;
+use tokio;
+
+mod mails;
 
 const BANNER: &str = r#"
  _____  _           _____                              _       _     _     _             _             
@@ -11,4 +14,9 @@ const BANNER: &str = r#"
 
 fn main() {
     println!("{}", BANNER.fg_rgb::<0x2E, 0x31, 0x92>());
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    rt.block_on(async {
+        mails::GuerrillaMail::create_new_email().await;
+    })
 }
