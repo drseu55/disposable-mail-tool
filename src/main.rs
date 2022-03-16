@@ -17,6 +17,12 @@ fn main() {
     let rt = tokio::runtime::Runtime::new().unwrap();
 
     rt.block_on(async {
-        mails::GuerrillaMail::create_new_email().await;
+        let email = mails::GuerrillaMail::create_new_email().await;
+        if email.is_ok() {
+            println!("{:?}", email);
+        } else {
+            println!("Something went wrong when creating email");
+        }
+        // mails::GuerrillaMail::check_email(1).await;
     })
 }

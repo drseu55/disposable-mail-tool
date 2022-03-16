@@ -1,4 +1,5 @@
 use crate::mails::MailError;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use reqwest;
@@ -24,6 +25,17 @@ impl GuerrillaMail {
         .await
         .unwrap();
 
+        // Get only PHPSESSID value
+        let headers = response.headers();
+
+        let re = Regex::new(";.*$").unwrap();
+        let phpsessid = re.replace(headers["set-cookie"].to_str().unwrap(), "");
+
+        let re = Regex::new("^[A-Z]+=").unwrap();
+        let phpsessid = re.replace(&phpsessid, "");
+
+        println!("{:?}", phpsessid);
+
         // let mail: GuerrillaMail = response.json().await.unwrap();
 
         match response.status() {
@@ -33,5 +45,15 @@ impl GuerrillaMail {
             },
             error => Err(MailError::ResponseError(error.to_string())),
         }
+    }
+
+    pub async fn check_email(seq: u32) {
+        let response = reqwest::get(format!(
+            "https://www.guerrillamail.com/ajax.php?f=check_email&seq={seq}&ip=127.0.0.1&agent=Mozilla"
+        ))
+        .await
+        .unwrap();
+
+        println!("{:?}", response.text().await);
     }
 }
