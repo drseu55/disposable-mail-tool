@@ -6,6 +6,8 @@ pub enum MailError {
     ResponseError(String),
     #[error("Returned JSON doesn't match struct")]
     MatchError,
+    #[error("Error: `{0}` when creating email")]
+    CreateEmailError(String),
 }
 
 impl std::convert::From<reqwest::Error> for MailError {
