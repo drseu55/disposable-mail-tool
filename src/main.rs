@@ -1,4 +1,5 @@
 use owo_colors::OwoColorize;
+use serde_json;
 use tokio;
 
 mod mails;
@@ -12,17 +13,29 @@ const BANNER: &str = r#"
                                                |___/                                             |___/                                                                                                                     
 "#;
 
-fn main() {
+fn main() -> Result<(), mails::MailError> {
     println!("{}", BANNER.fg_rgb::<0x2E, 0x31, 0x92>());
     let rt = tokio::runtime::Runtime::new().unwrap();
 
     rt.block_on(async {
-        let email = mails::GuerrillaMail::create_new_email().await;
-        if email.is_ok() {
-            println!("{:?}", email);
-        } else {
-            println!("Something went wrong when creating email");
-        }
+        let (guerrilla_email, phpsessid_value) = mails::GuerrillaMail::create_new_email().await?;
+
+        let mut guerrilla_user = mails::GuerrillaUser::new();
+        guerrilla_user.email(guerrilla_email);
+        guerrilla_user.phpsessid(phpsessid_value);
+
+        let response = mails::GuerrillaMail::check_email(&guerrilla_user.phpsessid[0], 1).await?;
+        println!("{}", serde_json::to_string_pretty(&response).unwrap());
+
+        // if email.is_ok() {
+        //     println!("{:?}", email);
+        // } else {
+        //     println!(
+        //         "Something went wrong when creating email: {}",
+        //         email.unwrap_err()
+        //     );
+        // }
         // mails::GuerrillaMail::check_email(1).await;
+        Ok(())
     })
 }

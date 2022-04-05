@@ -2,7 +2,7 @@ use crate::mails::MailError;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use reqwest;
+use reqwest::Client;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GuerrillaMail {
@@ -13,20 +13,23 @@ pub struct GuerrillaMail {
 }
 
 pub struct GuerrillaUser {
-    phpsessid: Vec<String>,
+    pub phpsessid: Vec<String>,
     mails: Vec<GuerrillaMail>,
 }
 
 impl GuerrillaMail {
-    pub async fn create_new_email() -> Result<Self, MailError> {
-        let response = reqwest::get(
+    pub async fn create_new_email() -> Result<(Self, String), MailError> {
+        let response = match reqwest::get(
             "https://www.guerrillamail.com/ajax.php?f=get_email_address&ip=127.0.0.1&agent=Mozilla",
         )
         .await
-        .unwrap();
+        {
+            Ok(response) => response,
+            Err(e) => return Err(MailError::CreateEmailError(e.to_string())),
+        };
 
         // Get only PHPSESSID value
-        let headers = response.headers();
+        let headers = response.headers().clone();
 
         let re = Regex::new(";.*$").unwrap();
         let phpsessid = re.replace(headers["set-cookie"].to_str().unwrap(), "");
@@ -34,26 +37,45 @@ impl GuerrillaMail {
         let re = Regex::new("^[A-Z]+=").unwrap();
         let phpsessid = re.replace(&phpsessid, "");
 
-        println!("{:?}", phpsessid);
-
-        // let mail: GuerrillaMail = response.json().await.unwrap();
-
         match response.status() {
             reqwest::StatusCode::OK => match response.json::<GuerrillaMail>().await {
-                Ok(mail) => Ok(mail),
+                Ok(mail) => Ok((mail, phpsessid.to_string())),
                 Err(_) => Err(MailError::MatchError),
             },
             error => Err(MailError::ResponseError(error.to_string())),
         }
     }
 
-    pub async fn check_email(seq: u32) {
-        let response = reqwest::get(format!(
+    // async fn set_email_address(email_user: String, lang: String) {
+
+    // }
+
+    pub async fn check_email(phpsessid_value: &String, seq: u32) -> Result<String, reqwest::Error> {
+        let client = Client::builder().build()?;
+        let response = client.get(format!(
             "https://www.guerrillamail.com/ajax.php?f=check_email&seq={seq}&ip=127.0.0.1&agent=Mozilla"
         ))
-        .await
-        .unwrap();
+        .header("Cookie", format!("PHPSESSID={phpsessid_value}"))
+        .send()
+        .await?;
 
-        println!("{:?}", response.text().await);
+        Ok(response.text().await?)
+    }
+}
+
+impl GuerrillaUser {
+    pub fn new() -> Self {
+        GuerrillaUser {
+            phpsessid: Vec::new(),
+            mails: Vec::new(),
+        }
+    }
+
+    pub fn email(&mut self, email: GuerrillaMail) {
+        self.mails.push(email);
+    }
+
+    pub fn phpsessid(&mut self, phpsessid_value: String) {
+        self.phpsessid.push(phpsessid_value);
     }
 }
