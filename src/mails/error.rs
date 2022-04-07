@@ -8,10 +8,19 @@ pub enum MailError {
     MatchError,
     #[error("Error: `{0}` when creating email")]
     CreateEmailError(String),
+    // TODO: Create separate enums for file errors and runtime errors
+    #[error("Provider text file not found")]
+    FileNotFound,
 }
 
 impl std::convert::From<reqwest::Error> for MailError {
     fn from(err: reqwest::Error) -> Self {
         MailError::ResponseError(err.to_string())
+    }
+}
+
+impl std::convert::From<std::io::Error> for MailError {
+    fn from(_err: std::io::Error) -> Self {
+        MailError::FileNotFound
     }
 }

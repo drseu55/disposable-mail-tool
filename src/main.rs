@@ -2,7 +2,12 @@ use owo_colors::OwoColorize;
 use serde_json;
 use tokio;
 
+use std::fs;
+
+mod cli;
 mod mails;
+
+const FILENAME: &str = "providers.txt";
 
 const BANNER: &str = r#"
  _____  _           _____                              _       _     _     _             _             
@@ -13,29 +18,72 @@ const BANNER: &str = r#"
                                                |___/                                             |___/                                                                                                                     
 "#;
 
-fn main() -> Result<(), mails::MailError> {
+#[tokio::main]
+async fn main() -> Result<(), mails::MailError> {
     println!("{}", BANNER.fg_rgb::<0x2E, 0x31, 0x92>());
-    let rt = tokio::runtime::Runtime::new().unwrap();
 
-    rt.block_on(async {
-        let (guerrilla_email, phpsessid_value) = mails::GuerrillaMail::create_new_email().await?;
+    let args = cli::cli().get_matches();
 
-        let mut guerrilla_user = mails::GuerrillaUser::new();
-        guerrilla_user.email(guerrilla_email);
-        guerrilla_user.phpsessid(phpsessid_value);
+    match args.subcommand() {
+        Some(("list", _)) => {
+            list_providers()?;
+        }
+        Some(("create", sub_args)) => {
+            let provider = sub_args.value_of("PROVIDER").expect("required");
+            create_email_from_provider(provider).await?
+        }
+        _ => println!("No such argument"),
+    }
 
-        let response = mails::GuerrillaMail::check_email(&guerrilla_user.phpsessid[0], 1).await?;
-        println!("{}", serde_json::to_string_pretty(&response).unwrap());
+    Ok(())
+    //     // if email.is_ok() {
+    //     //     println!("{:?}", email);
+    //     // } else {
+    //     //     println!(
+    //     //         "Something went wrong when creating email: {}",
+    //     //         email.unwrap_err()
+    //     //     );
+    //     // }
+    //     // mails::GuerrillaMail::check_email(1).await;
+}
 
-        // if email.is_ok() {
-        //     println!("{:?}", email);
-        // } else {
-        //     println!(
-        //         "Something went wrong when creating email: {}",
-        //         email.unwrap_err()
-        //     );
-        // }
-        // mails::GuerrillaMail::check_email(1).await;
-        Ok(())
-    })
+fn list_providers() -> Result<(), mails::MailError> {
+    // TODO: Add description for each email provider in text file
+    let providers = fs::read_to_string(FILENAME)?;
+
+    println!("{}", providers);
+
+    Ok(())
+}
+
+async fn create_email_from_provider(provider: &str) -> Result<(), mails::MailError> {
+    match provider {
+        "guerrillamail" => {
+            let (guerrilla_email, phpsessid_value) =
+                mails::GuerrillaMail::create_new_email().await?;
+
+            let mut guerrilla_user = mails::GuerrillaUser::new();
+
+            guerrilla_user.email(guerrilla_email);
+            guerrilla_user.phpsessid(phpsessid_value);
+
+            println!(
+                "Your guerrilla temp email: {}",
+                guerrilla_user.mails[0].email_addr
+            );
+
+            Ok(())
+        }
+        _ => {
+            println!("Email provider not available");
+            Ok(())
+        }
+    }
+}
+
+fn fetch_inbox_from_provider() {
+    // let response =
+    //     mails::GuerrillaMail::check_email(&guerrilla_user.phpsessid[0], 1).await?;
+    // println!("{}", serde_json::to_string_pretty(&response).unwrap());
+    unimplemented!()
 }

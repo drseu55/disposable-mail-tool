@@ -6,15 +6,16 @@ use reqwest::Client;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GuerrillaMail {
-    email_addr: String,
+    pub email_addr: String,
     email_timestamp: u64,
     alias: String,
     sid_token: String,
 }
 
 pub struct GuerrillaUser {
+    // TODO: Save data in json file and fetch
     pub phpsessid: Vec<String>,
-    mails: Vec<GuerrillaMail>,
+    pub mails: Vec<GuerrillaMail>,
 }
 
 impl GuerrillaMail {
