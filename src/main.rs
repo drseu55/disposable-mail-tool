@@ -26,11 +26,12 @@ async fn main() -> Result<(), mails::MailError> {
 
     match args.subcommand() {
         Some(("list", _)) => {
-            list_providers()?;
+            println!("{}", list_providers()?);
         }
         Some(("create", sub_args)) => {
             let provider = sub_args.value_of("PROVIDER").expect("required");
-            create_email_from_provider(provider).await?
+            let generated_email = create_email_from_provider(provider).await?;
+            println!("Your guerrilla temp email: {}", generated_email);
         }
         _ => println!("No such argument"),
     }
@@ -47,16 +48,13 @@ async fn main() -> Result<(), mails::MailError> {
     //     // mails::GuerrillaMail::check_email(1).await;
 }
 
-fn list_providers() -> Result<(), mails::MailError> {
+fn list_providers() -> Result<String, mails::MailError> {
     // TODO: Add description for each email provider in text file
     let providers = fs::read_to_string(FILENAME)?;
-
-    println!("{}", providers);
-
-    Ok(())
+    Ok(providers)
 }
 
-async fn create_email_from_provider(provider: &str) -> Result<(), mails::MailError> {
+async fn create_email_from_provider(provider: &str) -> Result<String, mails::MailError> {
     match provider {
         "guerrillamail" => {
             let (guerrilla_email, phpsessid_value) =
@@ -67,17 +65,11 @@ async fn create_email_from_provider(provider: &str) -> Result<(), mails::MailErr
             guerrilla_user.email(guerrilla_email);
             guerrilla_user.phpsessid(phpsessid_value);
 
-            println!(
-                "Your guerrilla temp email: {}",
-                guerrilla_user.mails[0].email_addr
-            );
+            let generated_email = guerrilla_user.mails[0].email_addr.clone();
 
-            Ok(())
+            Ok(generated_email)
         }
-        _ => {
-            println!("Email provider not available");
-            Ok(())
-        }
+        _ => Ok("Email provider not available".to_string()),
     }
 }
 
@@ -86,4 +78,36 @@ fn fetch_inbox_from_provider() {
     //     mails::GuerrillaMail::check_email(&guerrilla_user.phpsessid[0], 1).await?;
     // println!("{}", serde_json::to_string_pretty(&response).unwrap());
     unimplemented!()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::any;
+
+    fn type_of<T>(_: T) -> &'static str {
+        any::type_name::<T>()
+    }
+
+    #[test]
+    fn test_list_providers() {
+        assert_eq!(
+            list_providers().unwrap(),
+            "guerrillamail\ntemp-mail.org\n10minutemail\ndropmail.me".to_string()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_guerrillamail_creation() -> Result<(), mails::MailError> {
+        let email = create_email_from_provider("guerrillamail").await;
+        assert!(!email.is_err());
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_not_found_provider_email_creation() -> Result<(), mails::MailError> {
+        let email = create_email_from_provider("example").await?;
+        assert_eq!(email, "Email provider not available".to_string());
+        Ok(())
+    }
 }
