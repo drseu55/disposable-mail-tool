@@ -1,19 +1,23 @@
 use crate::mails::MailError;
+use mongodb::bson::oid;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use reqwest::Client;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GuerrillaMail {
     pub email_addr: String,
-    email_timestamp: u64,
-    alias: String,
-    sid_token: String,
+    pub email_timestamp: u64,
+    pub alias: String,
+    pub sid_token: String,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GuerrillaUser {
-    // TODO: Save data in json file and fetch
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<oid::ObjectId>,
+    pub name: String,
     pub phpsessid: Vec<String>,
     pub mails: Vec<GuerrillaMail>,
 }
@@ -47,18 +51,19 @@ impl GuerrillaMail {
         }
     }
 
-    // async fn set_email_address(email_user: String, lang: String) {
-
-    // }
-
-    pub async fn check_email(phpsessid_value: &String, seq: u32) -> Result<String, reqwest::Error> {
+    pub async fn check_email(
+        phpsessid_value: &String,
+        seq: u32,
+        sid_token: &String,
+    ) -> Result<String, reqwest::Error> {
         let client = Client::builder().build()?;
-        let response = client.get(format!(
-            "https://www.guerrillamail.com/ajax.php?f=check_email&seq={seq}&ip=127.0.0.1&agent=Mozilla"
+        let response = client
+            .get(format!(
+            "https://www.guerrillamail.com/ajax.php?f=check_email&seq={seq}&sid_token={sid_token}"
         ))
-        .header("Cookie", format!("PHPSESSID={phpsessid_value}"))
-        .send()
-        .await?;
+            .header("Cookie", format!("PHPSESSID={phpsessid_value}"))
+            .send()
+            .await?;
 
         Ok(response.text().await?)
     }
@@ -67,6 +72,8 @@ impl GuerrillaMail {
 impl GuerrillaUser {
     pub fn new() -> Self {
         GuerrillaUser {
+            id: None,
+            name: "guerrillamail".to_string(),
             phpsessid: Vec::new(),
             mails: Vec::new(),
         }
