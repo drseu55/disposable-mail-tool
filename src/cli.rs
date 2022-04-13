@@ -25,6 +25,7 @@ pub fn cli() -> Command<'static> {
                 .arg(arg!(<PROVIDER> "Email provider"))
                 .arg_required_else_help(true),
         )
+        // TODO: Implement basic SMTP server in separate repository
         .subcommand(
             Command::new("send")
                 .about("Sends new email")
@@ -33,11 +34,11 @@ pub fn cli() -> Command<'static> {
                 .arg_required_else_help(true),
         )
         .subcommand(
-            Command::new("check")
-                .about("Checks available emails from inbox")
+            Command::new("get")
+                .about("Fetches available emails")
                 .arg(arg!(-'e' --"email" <EMAIL> "Email address"))
                 .arg_required_else_help(true)
-                .arg(arg!(-'c' --"count" <COUNT> "The sequence number (id) of the oldest email - max 20"))
+                .arg(arg!(-'o' --"offset" <OFFSET> "How many emails to start from. Ex: Offset of 0 will fetch a list of the first 10 emails"))
                 .arg_required_else_help(true),
         )
 }
@@ -76,12 +77,6 @@ pub async fn menu() -> Result<(), mails::MailError> {
                         let query = bson::doc! { "name": "guerrillamail" };
                         let update = bson::doc! { "$push": { "mails": document_mail } };
 
-                        // TODO: Consider another approach to eliminate variable cloning
-                        email_users.update_one(query.clone(), update, None).await?;
-
-                        let update =
-                            bson::doc! { "$push": { "phpsessid": &guerrilla_user.phpsessid[0] } };
-
                         email_users.update_one(query, update, None).await?;
                     } else {
                         // If there is not a guerrillamail collection, create new collection and add data
@@ -104,9 +99,9 @@ pub async fn menu() -> Result<(), mails::MailError> {
                 _ => panic!("Unexpected struct"),
             }
         }
-        Some(("check", sub_args)) => {
+        Some(("get", sub_args)) => {
             let email = sub_args.value_of("email").expect("required");
-            let seq = sub_args.value_of("count").expect("required");
+            let seq = sub_args.value_of("offset").expect("required");
 
             // TODO: Handle parse error properly
             let seq: u32 = seq.parse().unwrap();
@@ -131,13 +126,11 @@ fn list_providers(filename: &str) -> Result<String, mails::MailError> {
 async fn create_email_from_provider(provider: &str) -> Result<mails::MailEnum, mails::MailError> {
     match provider {
         "guerrillamail" => {
-            let (guerrilla_email, phpsessid_value) =
-                mails::GuerrillaMail::create_new_email().await?;
+            let guerrilla_email = mails::GuerrillaMail::create_new_email().await?;
 
             let mut guerrilla_user = mails::GuerrillaUser::new();
 
             guerrilla_user.email(guerrilla_email);
-            guerrilla_user.phpsessid(phpsessid_value);
 
             Ok(mails::MailEnum::Guerrilla(guerrilla_user))
         }
@@ -147,8 +140,8 @@ async fn create_email_from_provider(provider: &str) -> Result<mails::MailEnum, m
     }
 }
 
-// Should search db to find the correct values
-// and make a correct object
+/// Searches database to find the correct values
+/// and deserialize them to correct struct
 async fn check_available_emails_from_provider(
     db: &mongodb::Database,
     email: &str,
@@ -179,8 +172,7 @@ async fn check_available_emails_from_provider(
                         .position(|x| x.email_addr == email)
                         .unwrap();
 
-                    let response = mails::GuerrillaMail::check_email(
-                        &guerrilla_user_struct.phpsessid[index],
+                    let response = mails::GuerrillaMail::get_email_list(
                         seq,
                         &guerrilla_user_struct.mails[index].sid_token,
                     )
