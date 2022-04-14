@@ -1,5 +1,5 @@
 use crate::mails::MailError;
-use chrono::{prelude::*, Duration};
+use chrono::prelude::*;
 use mongodb::bson::oid;
 use serde::{Deserialize, Serialize};
 

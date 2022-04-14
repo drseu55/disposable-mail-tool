@@ -1,13 +1,14 @@
 use bson;
-use chrono::{prelude::*, Duration};
+use chrono::prelude::*;
 use clap::{arg, Command};
-use futures::stream::TryStreamExt;
-use mongodb::{options, Client, IndexModel};
+use mongodb;
 use owo_colors::colors::*;
 use owo_colors::OwoColorize;
-use std::time;
+use serde_json;
+use tokio;
 
 use std::fs;
+use std::time::Duration;
 
 use crate::db;
 use crate::mails;
@@ -43,6 +44,14 @@ pub fn cli() -> Command<'static> {
                 .arg(arg!(-'o' --"offset" <OFFSET> "How many emails to start from. Ex: Offset of 0 will fetch a list of the first 10 emails"))
                 .arg_required_else_help(true),
         )
+        .subcommand(
+            Command::new("check")
+                .about("Checkes for new email")
+                .arg(arg!(-'e' --"email" <EMAIL> "Email address"))
+                .arg_required_else_help(true)
+                .arg(arg!(-'c' --"count" <COUNT> "The sequence number (id) of the oldest email"))
+                .arg_required_else_help(true),
+        )
 }
 
 pub async fn menu() -> Result<(), mails::MailError> {
@@ -62,6 +71,8 @@ pub async fn menu() -> Result<(), mails::MailError> {
 
             let email_users = db.collection::<bson::Document>("email_users");
 
+            db::create_index(&email_users).await?;
+
             match provider_struct {
                 mails::MailEnum::Guerrilla(guerrilla_user) => {
                     let serialized_guerrilla_mail = bson::to_bson(&guerrilla_user)?;
@@ -69,18 +80,6 @@ pub async fn menu() -> Result<(), mails::MailError> {
                     // It is safe to call unwrap on this result because
                     // serializing a struct to BSON (above function) creates a BSON document type.
                     let document = serialized_guerrilla_mail.as_document().unwrap();
-
-                    // Delete mail after 60 minutes
-                    let index_key = bson::doc! { "createdAt": 1 };
-                    let index_options = options::IndexOptions::builder()
-                        .expire_after(Some(time::Duration::new(3600, 0)))
-                        .build();
-                    let index_model = IndexModel::builder()
-                        .keys(index_key)
-                        .options(index_options)
-                        .build();
-
-                    email_users.create_index(index_model, None).await?;
 
                     email_users.insert_one(document.to_owned(), None).await?;
 
@@ -98,13 +97,21 @@ pub async fn menu() -> Result<(), mails::MailError> {
             let email = sub_args.value_of("email").expect("required");
             let seq = sub_args.value_of("offset").expect("required");
 
-            // TODO: Handle parse error properly
-            let seq: u32 = seq.parse().unwrap();
+            let seq: u32 = seq.parse()?;
 
-            let response = check_available_emails_from_provider(&db, email, seq).await?;
+            let response = check_available_emails_from_provider(&db, "get", email, seq).await?;
 
-            // TODO: Handle serde_json error properly
-            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+            println!("{:?}", response);
+        }
+        Some(("check", sub_args)) => {
+            let email = sub_args.value_of("email").expect("required");
+            let seq = sub_args.value_of("count").expect("required");
+
+            let seq: u32 = seq.parse()?;
+
+            let response = check_available_emails_from_provider(&db, "check", email, seq).await?;
+
+            println!("{:?}", response);
         }
         _ => println!("No such argument"),
     }
@@ -149,18 +156,17 @@ async fn create_email_from_provider(provider: &str) -> Result<mails::MailEnum, m
 /// and deserialize them to correct struct
 async fn check_available_emails_from_provider(
     db: &mongodb::Database,
+    call_function: &str,
     email: &str,
     seq: u32,
-) -> Result<String, mails::MailError> {
+) -> Result<Vec<serde_json::Value>, mails::MailError> {
     // Check if email address is in database
     // If it is not, it means that user did not run create first
-    // TODO: Check if email expired (current timestamp and timestamp from db)
-    // If it is expired, call set_email_address endpoint to set same address
-    let emails_user = db.collection::<bson::Document>("emails_user");
+    let email_users = db.collection::<bson::Document>("email_users");
 
     let filter = bson::doc! {"mails.email_addr": email};
 
-    let found_obj = emails_user.find_one(filter, None).await?;
+    let found_obj = email_users.find_one(filter, None).await?;
 
     match found_obj {
         Some(email_obj) => {
@@ -177,20 +183,58 @@ async fn check_available_emails_from_provider(
                         .position(|x| x.email_addr == email)
                         .unwrap();
 
-                    let response = mails::GuerrillaMail::get_email_list(
-                        seq,
-                        &guerrilla_user_struct.mails[index].sid_token,
-                    )
-                    .await?;
+                    let result_response = if call_function == "get" {
+                        let response = mails::GuerrillaMail::get_email_list(
+                            seq,
+                            &guerrilla_user_struct.mails[index].sid_token,
+                        )
+                        .await?;
 
-                    Ok(response)
+                        let value: serde_json::Value = serde_json::from_str(&response)?;
+
+                        // Using unwrap is safe here if Guerrillamail API does not change return type
+                        // Currently returns a vector
+                        let list = value["list"].as_array().unwrap();
+
+                        list.to_vec()
+                    } else {
+                        // Check every 10 seconds if returned list
+                        // from response has data
+                        let mut i = tokio::time::interval(Duration::from_secs(10));
+                        loop {
+                            i.tick().await;
+
+                            let response = mails::GuerrillaMail::check_email(
+                                seq,
+                                &guerrilla_user_struct.mails[index].sid_token,
+                            )
+                            .await?;
+
+                            let value: serde_json::Value = serde_json::from_str(&response)?;
+
+                            // Using unwrap is safe here if Guerrillamail API does not change return type
+                            // Currently returns a vector
+                            let list = value["list"].as_array().unwrap();
+
+                            println!("List: {:?}", list);
+
+                            if list.is_empty() {
+                                println!("Checking for new email...");
+                            } else {
+                                break list.to_vec();
+                            }
+                        }
+                    };
+
+                    Ok(result_response)
                 }
                 _ => panic!("Unexpected email provider"),
             }
         }
-        None => Ok("Email address is not in database.
-            You are passing a wrong email address or you did not call create first"
-            .to_string()),
+        // None => Ok("Email address is not in database.
+        //     You are passing a wrong email address, you did not call create first or email address expired."
+        //     .to_string()),
+        None => Ok(Vec::new()),
     }
 }
 
