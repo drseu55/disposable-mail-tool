@@ -1,4 +1,5 @@
 use crate::mails::MailError;
+use chrono::{prelude::*, Duration};
 use mongodb::bson::oid;
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +17,13 @@ pub struct GuerrillaMail {
 pub struct GuerrillaUser {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<oid::ObjectId>,
+    #[serde(
+        rename = "createdAt",
+        default = "date_default_value",
+        skip_deserializing,
+        with = "bson::serde_helpers::chrono_datetime_as_bson_datetime"
+    )]
+    pub created_at: chrono::DateTime<Utc>,
     pub name: String,
     pub mails: Vec<GuerrillaMail>,
 }
@@ -68,9 +76,10 @@ impl GuerrillaMail {
 }
 
 impl GuerrillaUser {
-    pub fn new() -> Self {
+    pub fn new(mail_creation_date: chrono::DateTime<Utc>) -> Self {
         GuerrillaUser {
             id: None,
+            created_at: mail_creation_date,
             name: "guerrillamail".to_string(),
             mails: Vec::new(),
         }
@@ -79,4 +88,8 @@ impl GuerrillaUser {
     pub fn email(&mut self, email: GuerrillaMail) {
         self.mails.push(email);
     }
+}
+
+fn date_default_value() -> chrono::DateTime<Utc> {
+    chrono::Utc::now()
 }

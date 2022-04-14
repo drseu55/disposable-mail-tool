@@ -234,6 +234,7 @@ name = "disposable-mail-tool"
 version = "0.1.0"
 dependencies = [
  "bson",
+ "chrono",
  "clap",
  "futures",
  "mongodb",

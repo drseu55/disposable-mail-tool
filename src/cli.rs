@@ -1,9 +1,11 @@
 use bson;
+use chrono::{prelude::*, Duration};
 use clap::{arg, Command};
 use futures::stream::TryStreamExt;
-use mongodb::{options, Client};
+use mongodb::{options, Client, IndexModel};
 use owo_colors::colors::*;
 use owo_colors::OwoColorize;
+use std::time;
 
 use std::fs;
 
@@ -58,36 +60,29 @@ pub async fn menu() -> Result<(), mails::MailError> {
 
             let provider_struct = create_email_from_provider(provider).await?;
 
+            let email_users = db.collection::<bson::Document>("email_users");
+
             match provider_struct {
                 mails::MailEnum::Guerrilla(guerrilla_user) => {
-                    let email_users = db.collection::<bson::Document>("emails_user");
+                    let serialized_guerrilla_mail = bson::to_bson(&guerrilla_user)?;
 
-                    if db
-                        .list_collection_names(None)
-                        .await?
-                        .contains(&"emails_user".to_string())
-                    {
-                        // If there is a guerrillamail collection, update mails list
-                        let serialized_guerrilla_mail = bson::to_bson(&guerrilla_user.mails[0])?;
+                    // It is safe to call unwrap on this result because
+                    // serializing a struct to BSON (above function) creates a BSON document type.
+                    let document = serialized_guerrilla_mail.as_document().unwrap();
 
-                        // It is safe to call unwrap on this result because
-                        // serializing a struct to BSON (above function) creates a BSON document type.
-                        let document_mail = serialized_guerrilla_mail.as_document().unwrap();
+                    // Delete mail after 60 minutes
+                    let index_key = bson::doc! { "createdAt": 1 };
+                    let index_options = options::IndexOptions::builder()
+                        .expire_after(Some(time::Duration::new(3600, 0)))
+                        .build();
+                    let index_model = IndexModel::builder()
+                        .keys(index_key)
+                        .options(index_options)
+                        .build();
 
-                        let query = bson::doc! { "name": "guerrillamail" };
-                        let update = bson::doc! { "$push": { "mails": document_mail } };
+                    email_users.create_index(index_model, None).await?;
 
-                        email_users.update_one(query, update, None).await?;
-                    } else {
-                        // If there is not a guerrillamail collection, create new collection and add data
-                        let serialized_guerrilla_user = bson::to_bson(&guerrilla_user)?;
-
-                        // It is safe to call unwrap on this result because
-                        // serializing a struct to BSON (above function) creates a BSON document type.
-                        let document = serialized_guerrilla_user.as_document().unwrap();
-
-                        email_users.insert_one(document.to_owned(), None).await?;
-                    }
+                    email_users.insert_one(document.to_owned(), None).await?;
 
                     // TODO: Add some type of loading to tell user that email is generating
                     println!(
@@ -128,7 +123,17 @@ async fn create_email_from_provider(provider: &str) -> Result<mails::MailEnum, m
         "guerrillamail" => {
             let guerrilla_email = mails::GuerrillaMail::create_new_email().await?;
 
-            let mut guerrilla_user = mails::GuerrillaUser::new();
+            // Using unwrap is safe here, because unix timestamp
+            // does not gonna exceed i64 soon
+            let mail_creation_date = chrono::DateTime::from_utc(
+                NaiveDateTime::from_timestamp(
+                    guerrilla_email.email_timestamp.try_into().unwrap(),
+                    100_000_000,
+                ),
+                Utc,
+            );
+
+            let mut guerrilla_user = mails::GuerrillaUser::new(mail_creation_date);
 
             guerrilla_user.email(guerrilla_email);
 
