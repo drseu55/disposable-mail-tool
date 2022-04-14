@@ -18,6 +18,10 @@ pub enum MailError {
     BsonValueAccessError(String),
     #[error("{0}")]
     BsonDeserializeError(String),
+    #[error("{0}")]
+    ParseIntError(String),
+    #[error("{0}")]
+    SerdeJsonError(String),
 }
 
 impl std::convert::From<reqwest::Error> for MailError {
@@ -53,5 +57,17 @@ impl std::convert::From<bson::document::ValueAccessError> for MailError {
 impl std::convert::From<bson::de::Error> for MailError {
     fn from(err: bson::de::Error) -> Self {
         MailError::BsonDeserializeError(err.to_string())
+    }
+}
+
+impl std::convert::From<std::num::ParseIntError> for MailError {
+    fn from(err: std::num::ParseIntError) -> Self {
+        MailError::ParseIntError(err.to_string())
+    }
+}
+
+impl std::convert::From<serde_json::Error> for MailError {
+    fn from(err: serde_json::Error) -> Self {
+        MailError::SerdeJsonError(err.to_string())
     }
 }
