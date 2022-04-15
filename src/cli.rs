@@ -1,6 +1,7 @@
 use bson;
 use chrono::prelude::*;
 use clap::{arg, Command};
+use comfy_table::Table;
 use mongodb;
 use owo_colors::colors::*;
 use owo_colors::OwoColorize;
@@ -101,7 +102,7 @@ pub async fn menu() -> Result<(), mails::MailError> {
 
             let response = check_available_emails_from_provider(&db, "get", email, seq).await?;
 
-            println!("{:?}", response);
+            pretty_print_json(response);
         }
         Some(("check", sub_args)) => {
             let email = sub_args.value_of("email").expect("required");
@@ -111,7 +112,7 @@ pub async fn menu() -> Result<(), mails::MailError> {
 
             let response = check_available_emails_from_provider(&db, "check", email, seq).await?;
 
-            println!("{:?}", response);
+            pretty_print_json(response);
         }
         _ => println!("No such argument"),
     }
@@ -200,9 +201,22 @@ async fn check_available_emails_from_provider(
                     } else {
                         // Check every 10 seconds if returned list
                         // from response has data
+                        // Break after 5 minutes (30 ticks) if list is still empty
+                        println!(
+                            "Breaks automatically after 5 minutes if there is not a new email"
+                        );
+
                         let mut i = tokio::time::interval(Duration::from_secs(10));
+                        let mut counter = 0;
+
                         loop {
                             i.tick().await;
+
+                            counter += 1;
+
+                            if counter == 30 {
+                                break vec![];
+                            }
 
                             let response = mails::GuerrillaMail::check_email(
                                 seq,
@@ -215,8 +229,6 @@ async fn check_available_emails_from_provider(
                             // Using unwrap is safe here if Guerrillamail API does not change return type
                             // Currently returns a vector
                             let list = value["list"].as_array().unwrap();
-
-                            println!("List: {:?}", list);
 
                             if list.is_empty() {
                                 println!("Checking for new email...");
@@ -231,11 +243,41 @@ async fn check_available_emails_from_provider(
                 _ => panic!("Unexpected email provider"),
             }
         }
-        // None => Ok("Email address is not in database.
-        //     You are passing a wrong email address, you did not call create first or email address expired."
-        //     .to_string()),
-        None => Ok(Vec::new()),
+        None => Err(mails::MailError::EmailCheckError),
     }
+}
+
+fn pretty_print_json(json_data: Vec<serde_json::Value>) {
+    let mut table = Table::new();
+
+    table.set_header(vec!["ID", "From", "Subject", "Date"]);
+
+    if json_data.is_empty() {
+        println!("");
+        return;
+    }
+
+    for value in json_data {
+        // Using unwrap is safe here, because mail_timestamp always contains digits
+        // and does not gonna exceed u64 soon
+        let timestamp = value["mail_timestamp"]
+            .as_str()
+            .unwrap()
+            .parse::<i64>()
+            .unwrap();
+
+        let date: DateTime<Utc> =
+            chrono::DateTime::from_utc(NaiveDateTime::from_timestamp(timestamp, 0), Utc);
+
+        table.add_row(vec![
+            &value["mail_id"].to_string(),
+            &value["mail_from"].to_string(),
+            &value["mail_subject"].to_string(),
+            &date.to_string(),
+        ]);
+    }
+
+    println!("{table}");
 }
 
 #[cfg(test)]

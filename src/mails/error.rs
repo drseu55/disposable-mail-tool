@@ -8,6 +8,8 @@ pub enum MailError {
     MatchError,
     #[error("Error: `{0}` when creating email")]
     CreateEmailError(String),
+    #[error("Email address is not in database.\nYou are passing a wrong email address, you did not call create first or email address expired.")]
+    EmailCheckError,
     #[error("Provider text file not found")]
     FileNotFound,
     #[error("{0}")]
