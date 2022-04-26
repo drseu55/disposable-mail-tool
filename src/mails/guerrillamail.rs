@@ -1,5 +1,7 @@
 use crate::mails::MailError;
+use bson;
 use chrono::prelude::*;
+use futures::stream::TryStreamExt;
 use mongodb::bson::oid;
 use serde::{Deserialize, Serialize};
 
@@ -105,4 +107,50 @@ impl GuerrillaUser {
 
 fn date_default_value() -> chrono::DateTime<Utc> {
     chrono::Utc::now()
+}
+
+pub async fn get_unexpired_guerrillamails_from_db(
+    db: &mongodb::Database,
+) -> Result<Vec<String>, MailError> {
+    let email_users = db.collection::<bson::Document>("email_users");
+
+    let options = mongodb::options::FindOptions::builder()
+        .projection(bson::doc! { "mails.email_addr": 1, "_id": 0 })
+        .build();
+
+    let mut found_emails = email_users.find(bson::doc! {}, options).await?;
+
+    let mut emails: Vec<bson::Document> = Vec::new();
+
+    while let Some(email) = found_emails.try_next().await? {
+        emails.push(email);
+    }
+
+    if emails.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut email_addrs: Vec<String> = Vec::new();
+
+    for email in emails {
+        // Using unwrap is safe, because mongodb fields are known
+        if email.get("mails").is_some() {
+            let emails_bson = email.get("mails").unwrap().as_array().unwrap();
+            for email in emails_bson {
+                let email_addr = email
+                    .as_document()
+                    .unwrap()
+                    .get("email_addr")
+                    .unwrap()
+                    .as_str()
+                    .unwrap();
+
+                email_addrs.push(email_addr.to_owned());
+            }
+        } else {
+            return Ok(Vec::new());
+        };
+    }
+
+    Ok(email_addrs)
 }

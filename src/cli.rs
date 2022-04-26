@@ -23,6 +23,7 @@ pub fn cli() -> Command<'static> {
         .subcommand_required(true)
         .arg_required_else_help(true)
         .subcommand(Command::new("list").about("List available email providers"))
+        .subcommand(Command::new("guerrillamails").about("List unexpired guerillamails from database"))
         .subcommand(
             Command::new("create")
                 .about("Creates new email address")
@@ -72,6 +73,17 @@ pub async fn menu() -> Result<(), mails::MailError> {
     match args.subcommand() {
         Some(("list", _)) => {
             println!("{}", list_providers(FILENAME)?);
+        }
+        Some(("guerrillamails", _)) => {
+            let emails = mails::get_unexpired_guerrillamails_from_db(&db).await?;
+
+            if emails.is_empty() {
+                println!("There is not available guerrillamails");
+            }
+
+            for email_addr in emails {
+                println!("{}", email_addr);
+            }
         }
         Some(("create", sub_args)) => {
             let provider = sub_args.value_of("PROVIDER").expect("required");
