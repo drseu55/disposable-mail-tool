@@ -47,11 +47,19 @@ pub fn cli() -> Command<'static> {
         )
         .subcommand(
             Command::new("check")
-                .about("Checkes for new email")
+                .about("Checks for new email")
                 .arg(arg!(-'e' --"email" <EMAIL> "Email address"))
                 .arg_required_else_help(true)
                 .arg(arg!(-'c' --"count" <COUNT> "The sequence number (id) of the oldest email"))
                 .arg_required_else_help(true),
+        )
+        .subcommand(
+            Command::new("fetch")
+                .about("Fetches email information")
+                .arg(arg!(-'e' --"email" <EMAIL> "Email address"))
+                .arg_required_else_help(true)
+                .arg(arg!(--"id" <ID> "Id of the received email from inbox"))
+                .arg_required_else_help(true)
         )
 }
 
@@ -114,6 +122,14 @@ pub async fn menu() -> Result<(), mails::MailError> {
 
             pretty_print_json(response);
         }
+        Some(("fetch", sub_args)) => {
+            let email = sub_args.value_of("email").expect("required");
+            let email_id = sub_args.value_of("id").expect("required");
+
+            let response = fetch_email_from_provider(&db, email, email_id).await?;
+
+            print_fetched_email(response);
+        }
         _ => println!("No such argument"),
     }
 
@@ -163,11 +179,7 @@ async fn check_available_emails_from_provider(
 ) -> Result<Vec<serde_json::Value>, mails::MailError> {
     // Check if email address is in database
     // If it is not, it means that user did not run create first
-    let email_users = db.collection::<bson::Document>("email_users");
-
-    let filter = bson::doc! {"mails.email_addr": email};
-
-    let found_obj = email_users.find_one(filter, None).await?;
+    let found_obj = find_element_in_db(db, "email_users", "mails.email_addr", email).await?;
 
     match found_obj {
         Some(email_obj) => {
@@ -247,6 +259,60 @@ async fn check_available_emails_from_provider(
     }
 }
 
+async fn fetch_email_from_provider(
+    db: &mongodb::Database,
+    email: &str,
+    email_id: &str,
+) -> Result<serde_json::Value, mails::MailError> {
+    let found_obj = find_element_in_db(db, "email_users", "mails.email_addr", email).await?;
+
+    match found_obj {
+        Some(email_obj) => {
+            let name_str = email_obj.get_str("name")?;
+
+            match name_str {
+                "guerrillamail" => {
+                    let guerrilla_user_struct: GuerrillaUser =
+                        bson::from_bson(bson::Bson::Document(email_obj))?;
+
+                    let index = guerrilla_user_struct
+                        .mails
+                        .iter()
+                        .position(|x| x.email_addr == email)
+                        .unwrap();
+
+                    let response = mails::GuerrillaMail::fetch_email(
+                        email_id,
+                        &guerrilla_user_struct.mails[index].sid_token,
+                    )
+                    .await?;
+
+                    let value: serde_json::Value = serde_json::from_str(&response)?;
+
+                    Ok(value)
+                }
+                _ => panic!("Unexpected email provider"),
+            }
+        }
+        None => Err(mails::MailError::EmailCheckError),
+    }
+}
+
+async fn find_element_in_db(
+    db: &mongodb::Database,
+    collection: &str,
+    key: &str,
+    value: &str,
+) -> Result<Option<bson::Document>, mails::MailError> {
+    let email_users = db.collection::<bson::Document>(collection);
+
+    let filter = bson::doc! {key: value};
+
+    let found_obj = email_users.find_one(filter, None).await?;
+
+    Ok(found_obj)
+}
+
 fn pretty_print_json(json_data: Vec<serde_json::Value>) {
     let mut table = Table::new();
 
@@ -278,6 +344,20 @@ fn pretty_print_json(json_data: Vec<serde_json::Value>) {
     }
 
     println!("{table}");
+}
+
+fn print_fetched_email(value: serde_json::Value) {
+    if value == false {
+        println!("Unexpected email id");
+        return;
+    }
+
+    // Using unwrap is safe here
+    // because check for empty email is above
+    println!("From: {}", value["mail_from"].as_str().unwrap());
+    println!("Date: {} UTC", value["mail_date"].as_str().unwrap());
+    println!("Subject: {}", value["mail_subject"].as_str().unwrap());
+    println!("\n{}", value["mail_body"].as_str().unwrap());
 }
 
 #[cfg(test)]

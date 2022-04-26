@@ -73,6 +73,19 @@ impl GuerrillaMail {
 
         Ok(response.text().await?)
     }
+
+    pub async fn fetch_email(email_id: &str, sid_token: &String) -> Result<String, reqwest::Error> {
+        let client = Client::builder().build()?;
+        let response = client
+            .get(format!(
+            "https://www.guerrillamail.com/ajax.php?f=fetch_email&email_id={email_id}&sid_token={sid_token}"
+        ))
+            .header("Cookie", format!("PHPSESSID={sid_token}"))
+            .send()
+            .await?;
+
+        Ok(response.text().await?)
+    }
 }
 
 impl GuerrillaUser {
