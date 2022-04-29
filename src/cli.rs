@@ -16,6 +16,8 @@ use crate::mails;
 use crate::mails::GuerrillaUser;
 
 const FILENAME: &str = "providers.txt";
+const URL: &str = "mongodb://localhost";
+const PORT: &str = "27017";
 
 pub fn cli() -> Command<'static> {
     Command::new("disposable_mail")
@@ -28,14 +30,6 @@ pub fn cli() -> Command<'static> {
             Command::new("create")
                 .about("Creates new email address")
                 .arg(arg!(<PROVIDER> "Email provider"))
-                .arg_required_else_help(true),
-        )
-        // TODO: Implement basic SMTP server in separate repository
-        .subcommand(
-            Command::new("send")
-                .about("Sends new email")
-                .arg(arg!(-r --receiver <RECEIVER> "Type email to receive your message"))
-                .arg(arg!(-m --message <MESSAGE> "File which content will be send"))
                 .arg_required_else_help(true),
         )
         .subcommand(
@@ -67,7 +61,7 @@ pub fn cli() -> Command<'static> {
 pub async fn menu() -> Result<(), mails::MailError> {
     let args = cli().get_matches();
 
-    let mongodb_client = db::connect().await?;
+    let mongodb_client = db::connect(URL, PORT).await?;
     let db = mongodb_client.database("disposable_mail_db");
 
     match args.subcommand() {
@@ -104,7 +98,6 @@ pub async fn menu() -> Result<(), mails::MailError> {
 
                     email_users.insert_one(document.to_owned(), None).await?;
 
-                    // TODO: Add some type of loading to tell user that email is generating
                     println!(
                         "Your guerrilla temp email: {}",
                         guerrilla_user.mails[0].email_addr
@@ -149,7 +142,6 @@ pub async fn menu() -> Result<(), mails::MailError> {
 }
 
 fn list_providers(filename: &str) -> Result<String, mails::MailError> {
-    // TODO: Add description for each email provider in text file
     let providers = fs::read_to_string(filename)?;
     Ok(providers)
 }
@@ -392,6 +384,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[ignore]
     async fn test_guerrillamail_creation() -> Result<(), mails::MailError> {
         let email = create_email_from_provider("guerrillamail").await;
         assert!(!email.is_err());
@@ -407,6 +400,19 @@ mod tests {
             }
             _ => panic!("Unexpected message"),
         }
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_find_element_in_db() -> Result<(), mails::MailError> {
+        let mongodb_client = db::connect(URL, PORT).await?;
+        let db = mongodb_client.database("disposable_mail_db");
+
+        let found =
+            find_element_in_db(&db, "email_users", "mails.email_addr", "some_value").await?;
+
+        assert_eq!(found, None);
+
         Ok(())
     }
 }

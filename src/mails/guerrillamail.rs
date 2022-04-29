@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use reqwest::Client;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct GuerrillaMail {
     pub email_addr: String,
     pub email_timestamp: u64,
@@ -15,7 +15,7 @@ pub struct GuerrillaMail {
     pub sid_token: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct GuerrillaUser {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
     pub id: Option<oid::ObjectId>,
@@ -153,4 +153,73 @@ pub async fn get_unexpired_guerrillamails_from_db(
     }
 
     Ok(email_addrs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[ignore]
+    async fn test_check_email() -> Result<(), MailError> {
+        let guerrillamail = GuerrillaMail::create_new_email().await?;
+
+        let response = GuerrillaMail::check_email(1, &guerrillamail.sid_token).await?;
+
+        let value: serde_json::Value = serde_json::from_str(&response)?;
+
+        assert_eq!(value["list"], serde_json::Value::Array(Vec::new()));
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[ignore]
+    async fn test_check_email_with_wrong_values() -> Result<(), MailError> {
+        let response = GuerrillaMail::check_email(1, &"test".to_string()).await?;
+
+        let value: serde_json::Value = serde_json::from_str(&response)?;
+
+        assert_eq!(
+            value["error"],
+            "Please call get_email_address or set_email_user first"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[ignore]
+    async fn test_get_email_list_with_wrong_values() -> Result<(), MailError> {
+        let response = GuerrillaMail::get_email_list(1, &"test".to_string()).await?;
+
+        let value: serde_json::Value = serde_json::from_str(&response)?;
+
+        assert_eq!(value["list"], serde_json::Value::Null);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[ignore]
+    async fn test_get_email_list() -> Result<(), MailError> {
+        let guerrillamail = GuerrillaMail::create_new_email().await?;
+
+        let response = GuerrillaMail::get_email_list(1, &guerrillamail.sid_token).await?;
+
+        let value: serde_json::Value = serde_json::from_str(&response)?;
+
+        assert_eq!(value["list"], serde_json::Value::Array(Vec::new()));
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_fetch_email_with_wrong_values() -> Result<(), MailError> {
+        let response = GuerrillaMail::fetch_email("111", &"test".to_string()).await?;
+
+        assert_eq!(response, "false".to_string());
+
+        Ok(())
+    }
 }

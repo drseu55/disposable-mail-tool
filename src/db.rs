@@ -4,11 +4,8 @@ use std::time;
 
 use crate::mails;
 
-const URL: &str = "mongodb://localhost";
-const PORT: &str = "27017";
-
-pub async fn connect() -> Result<Client, mongodb::error::Error> {
-    let mut client_options = ClientOptions::parse(format!("{URL}:{PORT}")).await?;
+pub async fn connect(url: &str, port: &str) -> Result<Client, mongodb::error::Error> {
+    let mut client_options = ClientOptions::parse(format!("{url}:{port}")).await?;
 
     client_options.app_name = Some("disposable_email".to_string());
 
@@ -34,4 +31,23 @@ pub async fn create_index(
     email_users.create_index(index_model, None).await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_db_connection() -> Result<(), mongodb::error::Error> {
+        let client = connect("mongodb://localhost", "27017").await;
+        assert!(client.is_ok());
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_db_connection_with_wrong_data() -> Result<(), mongodb::error::Error> {
+        let client = connect("mongodb://localhost", "some_port").await;
+        assert!(client.is_err());
+        Ok(())
+    }
 }
